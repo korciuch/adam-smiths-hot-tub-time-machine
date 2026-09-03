@@ -89,11 +89,19 @@ export function withoutTicker(slots: TickerSlots, ticker: string): TickerSlots {
 
 export function parseDashboardParams(raw: RawSearchParams): DashboardParams {
   const slots = parseTickerSlots(first(raw.tickers))
+  const from = parseDate(first(raw.from))
+  const to = parseDate(first(raw.to))
+
+  // A URL with no range gets the default one, not everything. The dataset holds
+  // ~20 years per company, so an open range is ~400KB of JSON per charted
+  // ticker - several MB on a first visit, for a chart nobody zoomed out on.
+  // One explicit bound is still honoured as given.
+  const range = from || to ? { from, to } : resolvePreset(DEFAULT_PRESET)
+
   return {
     slots,
     tickers: selectedTickers(slots),
-    from: parseDate(first(raw.from)),
-    to: parseDate(first(raw.to)),
+    ...range,
     normalize: first(raw.normalize) === '1',
   }
 }
@@ -125,13 +133,24 @@ export const RANGE_PRESETS = [
   { label: 'Max', months: 0 },
 ] as const
 
+export const DEFAULT_PRESET = '1Y'
+
+/**
+ * Earliest date the dataset can hold. Twelve Data caps a request at 5000 daily
+ * bars, so no company's history reaches further back than late 2006 whatever we
+ * ask for. "Max" resolves to this instead of an open bound because an absent
+ * `from` in the URL now means the default range - leaving it open would make
+ * Max unreachable, since clicking it would write a URL that parses back to 1Y.
+ */
+export const DATASET_START = '2006-01-01'
+
 export function resolvePreset(label: string, today = new Date()) {
   const preset = RANGE_PRESETS.find((p) => p.label === label)
   if (!preset) return { from: undefined, to: undefined }
 
   const to = today.toISOString().slice(0, 10)
 
-  if (preset.months === 0) return { from: undefined, to: undefined }
+  if (preset.months === 0) return { from: DATASET_START, to }
   if (preset.months === null) {
     return { from: `${today.getUTCFullYear()}-01-01`, to }
   }
