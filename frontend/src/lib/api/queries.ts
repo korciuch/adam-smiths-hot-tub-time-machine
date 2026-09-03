@@ -25,7 +25,15 @@ export type Fetched<T> = { ok: true; data: T } | { ok: false; error: string }
 /** Cache tag for everything notes-related, revalidated by the note actions. */
 export const NOTES_TAG = 'notes'
 
-const DAY_SECONDS = 60 * 60 * 24
+/**
+ * How long the UI may lag the database, not how often the underlying facts
+ * change. Constituents and daily closes both move rarely, but ingestion is what
+ * populates them, so a long window means a backfill appears to have done
+ * nothing. Shared by companies, prices and quotes so the table's companies and
+ * quotes can't expire at different times and show rows with no price. Notes are
+ * tag-revalidated instead, because their writes go through this app.
+ */
+const STALE_SECONDS = 60
 
 function failed(error: unknown): { ok: false; error: string } {
   if (error instanceof Error) {
@@ -44,7 +52,7 @@ function failed(error: unknown): { ok: false; error: string } {
 export async function getCompanies(): Promise<Fetched<Company[]>> {
   try {
     const { data, error } = await api.GET('/companies', {
-      next: { revalidate: DAY_SECONDS },
+      next: { revalidate: STALE_SECONDS },
     })
     if (error || !data) return { ok: false, error: 'Could not load companies.' }
     return { ok: true, data }
@@ -66,8 +74,7 @@ export async function getPrices(
   try {
     const { data, error, response } = await api.GET('/prices', {
       params: { query },
-      // Daily bars only change once a day; live movement comes over the relay.
-      next: { revalidate: 3600 },
+      next: { revalidate: STALE_SECONDS },
     })
     if (response.status === 404) {
       return { ok: false, error: `Unknown ticker: ${ticker}` }
@@ -86,7 +93,7 @@ export async function getLatestQuotes(tickers: string[]): Promise<Fetched<Quote[
   try {
     const { data, error } = await api.GET('/quotes/latest', {
       params: { query },
-      next: { revalidate: 3600 },
+      next: { revalidate: STALE_SECONDS },
     })
     if (error || !data) return { ok: false, error: 'Could not load latest quotes.' }
     return { ok: true, data }
