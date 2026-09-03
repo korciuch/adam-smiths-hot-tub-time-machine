@@ -89,9 +89,13 @@ export function Dashboard({ params, companies, quotes, notes, prices, errors }: 
 
   const { ticks, status } = useTicks(tickers)
 
+  // A selected ticker with no bars in the range stays in the series list with an
+  // empty array; the chart labels it in the legend. Dropping it here instead
+  // made the selection look like it hadn't registered. A ticker whose fetch
+  // failed has no key at all and is left out - the error banner covers that.
   const series = useMemo<ChartSeries[]>(() => {
     return slots.flatMap((ticker, slot) =>
-      ticker && prices[ticker]?.length ? [{ ticker, slot, prices: prices[ticker] }] : [],
+      ticker && prices[ticker] ? [{ ticker, slot, prices: prices[ticker] }] : [],
     )
   }, [slots, prices])
 

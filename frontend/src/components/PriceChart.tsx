@@ -354,6 +354,11 @@ export function PriceChart({
                 style={{ backgroundColor: colors[entry.slot % colors.length] }}
               />
               <span className="font-mono">{entry.ticker}</span>
+              {/* A company whose history doesn't cover the selected range draws
+                  no line. Saying so beats a legend entry pointing at nothing. */}
+              {entry.prices.length === 0 && (
+                <span className="text-[var(--text-muted)]">no data in range</span>
+              )}
             </li>
           ))}
         </ul>
