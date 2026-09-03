@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,7 +14,9 @@ router = APIRouter(tags=["prices"])
 @router.get("/prices", response_model=list[schemas.PriceOut])
 def get_prices(
     ticker: str,
-    from_: Optional[datetime.date] = None,
+    # `from` is a Python keyword, so the parameter is named `from_` and aliased
+    # back to the name TASKS.md specifies.
+    from_: Optional[datetime.date] = Query(default=None, alias="from"),
     to: Optional[datetime.date] = None,
     db: Session = Depends(get_db),
 ):

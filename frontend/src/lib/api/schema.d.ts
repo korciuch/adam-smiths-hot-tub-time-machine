@@ -273,7 +273,7 @@ export interface operations {
         parameters: {
             query: {
                 ticker: string;
-                from_?: string | null;
+                from?: string | null;
                 to?: string | null;
             };
             header?: never;
