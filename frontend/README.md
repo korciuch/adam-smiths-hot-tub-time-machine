@@ -17,6 +17,7 @@ The backend doesn't have to be up; reads degrade to an inline message.
 | `typecheck` / `lint` | `tsc --noEmit` / eslint |
 | `gen:types` | regenerate API types from a running backend |
 | `gen:types:offline` | same, from the committed `openapi.json` |
+| `check:ai` | chart inference + SQL lint checks (no browser, no backend) |
 
 ## Things you can't guess from the code
 
@@ -30,9 +31,26 @@ parameter name passes typecheck and is then silently dropped by FastAPI. Assigni
 to `PricesQuery`/`QuotesQuery`/`NotesQuery` first restores excess-property
 checking. Learned the hard way on `from` vs `from_`.
 
-**`chart_spec` is an untyped object in the API.** The shape this app accepts is
-specified and validated in `src/lib/ai/chart-spec.ts`. Anything else is dropped
-and the answer renders as a table.
+**The AI panel runs a real LLM in the browser.** WebLLM loads a WebGPU model on
+the first question (`src/lib/ai/engine.ts`, in a worker so generation doesn't
+freeze the tab), translates the question to SQL, and posts only the SQL to
+`/ai/execute-sql`. The question never reaches the server. Weights are cached in
+IndexedDB after the first load; `NEXT_PUBLIC_WEBLLM_MODEL_ID` overrides the
+default 3B model with something smaller on a constrained machine.
+
+**The chart type is a client-side heuristic, not a model output**
+(`src/lib/ai/infer-chart.ts`), then validated through `chart-spec.ts` like any
+other spec. The models in `research/webgpu-models/MODEL_FINDINGS.md` could not
+reliably keep a required column in the SELECT list, so they are not trusted with
+a second artifact that references those columns. The non-obvious part is the
+pivot: `(date, ticker, close)` has to become one series per ticker, or a
+two-company comparison plots as one line zig-zagging between them.
+
+**`lintSql` catches errors the database won't.** `company_id = 'AAPL'` — the
+documented 1B failure — is valid SQLite that matches zero rows and returns no
+error, so the correction loop can't see it. Silent wrong answers get caught
+client-side before the round trip; anything the driver rejects is fed back to
+the model instead, since its message is the better hint.
 
 **Reads are Server Components, writes are Server Actions** — so `BACKEND_URL`
 stays server-side and there's no CORS config or client fetch library.

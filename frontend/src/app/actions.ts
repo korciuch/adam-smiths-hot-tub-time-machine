@@ -4,7 +4,7 @@ import { updateTag } from 'next/cache'
 
 import { api } from '@/lib/api/client'
 import { NOTES_TAG } from '@/lib/api/queries'
-import type { AiQueryResponse, Note, NoteCreate, NoteUpdate } from '@/lib/api/types'
+import type { Note, NoteCreate, NoteUpdate, SqlExecuteResponse } from '@/lib/api/types'
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -72,17 +72,29 @@ export async function deleteNote(noteId: number): Promise<ActionResult<null>> {
   }
 }
 
-export async function askAi(question: string): Promise<ActionResult<AiQueryResponse>> {
-  const trimmed = question.trim()
-  if (!trimmed) return { ok: false, error: 'Ask a question first.' }
+/**
+ * Runs SQL written by the model in the user's browser.
+ *
+ * The question never reaches the server - only the SQL does. Guarding it is
+ * the backend's job (`backend/app/sql_guard.py`): this action is a proxy that
+ * keeps `BACKEND_URL` server-side, not a trust boundary, since anything can
+ * POST to the endpoint directly.
+ *
+ * A rejected or failing query comes back as a 200 with `error` set, which the
+ * client feeds to the model for a correction pass. Only transport failures
+ * are `ok: false` here.
+ */
+export async function executeSql(sql: string): Promise<ActionResult<SqlExecuteResponse>> {
+  const trimmed = sql.trim()
+  if (!trimmed) return { ok: false, error: 'No query to run.' }
 
   try {
-    const { data, error } = await api.POST('/ai/query', {
-      body: { question: trimmed },
+    const { data, error } = await api.POST('/ai/execute-sql', {
+      body: { sql: trimmed },
     })
-    if (error || !data) return { ok: false, error: 'The AI query failed.' }
+    if (error || !data) return { ok: false, error: 'The query could not be run.' }
     return { ok: true, data }
   } catch (cause) {
-    return failed(cause, 'The AI query failed.')
+    return failed(cause, 'The query could not be run.')
   }
 }
