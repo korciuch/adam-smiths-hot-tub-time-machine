@@ -18,11 +18,18 @@ def backfill_prices(
     api_key: str,
     tickers: Optional[List[str]] = None,
     delay_seconds: float = DEFAULT_DELAY_SECONDS,
+    only_missing: bool = False,
 ) -> Dict[str, list]:
     query = db.query(models.Company)
     if tickers:
         wanted = {t.upper() for t in tickers}
         query = query.filter(models.Company.ticker.in_(wanted))
+    if only_missing:
+        # A company we already have bars for costs an API credit to re-fetch and
+        # adds nothing. At 800 credits/day and ~12s per call, skipping them is
+        # what makes an interrupted run cheap to resume.
+        stored = db.query(models.Price.company_id).distinct()
+        query = query.filter(~models.Company.id.in_(stored))
     companies = query.order_by(models.Company.ticker).all()
 
     results: Dict[str, list] = {"succeeded": [], "failed": []}
