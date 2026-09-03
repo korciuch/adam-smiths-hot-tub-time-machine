@@ -1,0 +1,16 @@
+{
+  "name": "webgpu-model-research",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Exploratory spikes for in-browser WebGPU LLM inference (WebLLM). Not part of the shipped frontend.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  },
+  "dependencies": {
+    "@mlc-ai/web-llm": "^0.2.79"
+  }
+}
