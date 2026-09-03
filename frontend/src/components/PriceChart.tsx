@@ -356,6 +356,28 @@ export function PriceChart({
     }
   }, [ticks, series, normalize, seriesEpoch])
 
+  /**
+   * Why the plot area is empty, when it is. Both cases draw nothing, and an
+   * unexplained empty plot looks like the chart failed rather than like there is
+   * nothing to show yet.
+   */
+  const emptyState = useMemo(() => {
+    if (series.length === 0) {
+      return {
+        title: 'No company selected',
+        hint: 'Pick a ticker from the table below to chart its price history.',
+      }
+    }
+    if (series.every((entry) => entry.prices.length === 0)) {
+      const tickers = series.map((entry) => entry.ticker).join(', ')
+      return {
+        title: `No price data in this range for ${tickers}`,
+        hint: 'Try a wider date range, or a different company.',
+      }
+    }
+    return null
+  }, [series])
+
   const tableRows = useMemo(() => {
     if (!showTable) return []
     const dates = new Set<string>()
@@ -392,10 +414,12 @@ export function PriceChart({
           <button
             type="button"
             onClick={() => setChartError(fitToData())}
-            // Disabled rather than a silent no-op: before the async chart import
-            // resolves there is genuinely nothing to fit, and a button that
-            // swallows clicks reads as broken.
-            disabled={series.length === 0 || seriesEpoch === 0}
+            // Disabled rather than a silent no-op: with nothing plotted, or
+            // before the async chart import resolves, there is genuinely nothing
+            // to fit, and a button that swallows clicks reads as broken.
+            // `emptyState` is the same test the overlay uses, so the button and
+            // the plot area can never disagree about whether anything is drawn.
+            disabled={emptyState !== null || seriesEpoch === 0}
             className="h-8 rounded border border-[var(--hairline)] px-3 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Reset zoom
@@ -451,10 +475,16 @@ export function PriceChart({
       <div className="relative px-2 py-3">
         <div ref={containerRef} className="w-full" />
 
-        {series.length === 0 && (
-          <p className="absolute inset-0 flex items-center justify-center text-sm text-[var(--text-secondary)]">
-            Select a company in the table to chart it.
-          </p>
+        {emptyState && (
+          // Opaque and stacked above the chart, not merely laid over it.
+          // lightweight-charts paints into positioned canvases that otherwise win
+          // the stacking order against an un-z-indexed sibling, which left this
+          // message technically in the DOM but invisible behind an empty plot -
+          // a blank panel that reads as a failure rather than an empty state.
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 bg-[var(--surface-1)] px-4 text-center">
+            <p className="text-sm font-medium">{emptyState.title}</p>
+            <p className="text-sm text-[var(--text-secondary)]">{emptyState.hint}</p>
+          </div>
         )}
 
         {hover && (
