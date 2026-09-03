@@ -126,6 +126,23 @@ export function useTicks(symbols: string[]) {
     if (removed.length > 0) {
       socket.send(JSON.stringify({ type: 'unsubscribe', symbols: removed }))
       for (const symbol of removed) subscribed.delete(symbol)
+
+      // Drop their last prices too. A retained tick for a symbol we no longer
+      // listen to is frozen at whatever it was when we stopped, and the table
+      // reads a present price as "trading right now" - so keeping it would show
+      // a stale number as live, and sort it above symbols that really are
+      // printing.
+      setTicks((previous) => {
+        const next = { ...previous }
+        let changed = false
+        for (const symbol of removed) {
+          if (symbol in next) {
+            delete next[symbol]
+            changed = true
+          }
+        }
+        return changed ? next : previous
+      })
     }
     // `symbolKey` is the stable identity of `symbols`; the array itself is a new
     // reference on every render.
