@@ -35,34 +35,52 @@ def backfill_prices(
             _sleep_between(i, len(companies), delay_seconds)
             continue
 
-        existing_dates = {
-            row.date
-            for row in db.query(models.Price.date).filter(models.Price.company_id == company.id)
-        }
+        try:
+            added = _store_bars(db, company, bars)
+        except Exception as exc:  # a duplicate date shouldn't cost us the rest of the run
+            db.rollback()
+            results["failed"].append({"ticker": company.ticker, "error": str(exc)})
+            _sleep_between(i, len(companies), delay_seconds)
+            continue
 
-        added = 0
-        for bar in bars:
-            bar_date = date_cls.fromisoformat(bar["date"])
-            if bar_date in existing_dates:
-                continue
-            db.add(
-                models.Price(
-                    company_id=company.id,
-                    date=bar_date,
-                    open=bar["open"],
-                    high=bar["high"],
-                    low=bar["low"],
-                    close=bar["close"],
-                    volume=bar["volume"],
-                )
-            )
-            added += 1
-
-        db.commit()
         results["succeeded"].append({"ticker": company.ticker, "bars_added": added})
         _sleep_between(i, len(companies), delay_seconds)
 
     return results
+
+
+def _store_bars(db, company, bars: List[Dict]) -> int:
+    """Inserts bars we don't already have, returning how many were added."""
+    seen = {
+        row.date
+        for row in db.query(models.Price.date).filter(models.Price.company_id == company.id)
+    }
+
+    added = 0
+    for bar in bars:
+        bar_date = date_cls.fromisoformat(bar["date"])
+        # `seen` grows as we go. Twelve Data has returned the same date twice in
+        # one response (ARES, 2014-05-02), and a set seeded only from the DB
+        # can't catch that -- both rows pass the check and the second one trips
+        # the unique constraint.
+        if bar_date in seen:
+            continue
+        seen.add(bar_date)
+        db.add(
+            models.Price(
+                company_id=company.id,
+                date=bar_date,
+                open=bar["open"],
+                high=bar["high"],
+                low=bar["low"],
+                close=bar["close"],
+                volume=bar["volume"],
+            )
+        )
+        added += 1
+
+    db.commit()
+    return added
 
 
 def _sleep_between(i: int, total: int, delay_seconds: float) -> None:
