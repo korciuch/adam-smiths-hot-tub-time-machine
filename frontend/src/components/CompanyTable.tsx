@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   columnFilteringFeature,
+  constructSortFn,
   createColumnHelper,
   createFilteredRowModel,
   createPaginatedRowModel,
@@ -19,8 +20,26 @@ import {
 } from '@tanstack/react-table'
 
 import type { Company, Quote } from '@/lib/api/types'
-import type { Tick } from '@/lib/ticks/protocol'
+import { MAX_LIVE_SYMBOLS, type Tick } from '@/lib/ticks/protocol'
 import { MAX_SERIES } from '@/lib/series'
+
+/**
+ * Sorts symbols that are printing above symbols that are not.
+ *
+ * Presence only - two live symbols compare equal, so the tie falls through to
+ * the next sort entry (ticker) rather than ordering by price, which would rank
+ * a $500 share above a $30 one for no reason the user asked for.
+ *
+ * Ascending puts live first, so the default sort reads `desc: false`.
+ */
+const sortFn_liveFirst = constructSortFn({
+  sort: (a, b) => {
+    const aLive = a !== null && a !== undefined
+    const bLive = b !== null && b !== undefined
+    if (aLive === bLive) return 0
+    return aLive ? -1 : 1
+  },
+})
 
 const features = tableFeatures({
   columnFilteringFeature,
@@ -31,7 +50,11 @@ const features = tableFeatures({
   sortedRowModel: createSortedRowModel(),
   paginatedRowModel: createPaginatedRowModel(),
   filterFns: { includesString: filterFn_includesString },
-  sortFns: { alphanumeric: sortFn_alphanumeric, basic: sortFn_basic },
+  sortFns: {
+    alphanumeric: sortFn_alphanumeric,
+    basic: sortFn_basic,
+    liveFirst: sortFn_liveFirst,
+  },
 })
 
 /** One table row: a company plus whatever price information we have for it. */
@@ -67,6 +90,12 @@ type Props = {
   onToggleTicker: (ticker: string) => void
   /** Color for a selected ticker's slot, or null when unselected. */
   colorFor: (ticker: string) => string | null
+  /**
+   * Tickers currently on screen. Reported upwards so they can be subscribed for
+   * live prices: without this the Live column would only ever be populated for
+   * the handful of charted tickers, and every other row would read as flat.
+   */
+  onVisibleTickersChange: (tickers: string[]) => void
 }
 
 export function CompanyTable({
@@ -76,6 +105,7 @@ export function CompanyTable({
   slots,
   onToggleTicker,
   colorFor,
+  onVisibleTickersChange,
 }: Props) {
   const [globalFilter, setGlobalFilter] = useState('')
   const [sectorFilter, setSectorFilter] = useState('')
@@ -181,7 +211,7 @@ export function CompanyTable({
       }),
       columnHelper.accessor('live', {
         header: 'Live',
-        sortFn: 'basic',
+        sortFn: 'liveFirst',
         cell: (info) => {
           const value = info.getValue()
           return (
@@ -227,7 +257,13 @@ export function CompanyTable({
     onGlobalFilterChange: setGlobalFilter,
     globalFilterFn: 'includesString',
     initialState: {
-      sorting: [{ id: 'ticker', desc: false }],
+      // Trading symbols first, then alphabetical within each group. Outside
+      // market hours most rows have no live price, so this is what surfaces the
+      // few that are actually printing instead of burying them on page 14.
+      sorting: [
+        { id: 'live', desc: false },
+        { id: 'ticker', desc: false },
+      ],
       pagination: { pageIndex: 0, pageSize: 25 },
     },
   })
@@ -243,6 +279,33 @@ export function CompanyTable({
   const filteredCount = table.getFilteredRowModel().rows.length
   const pageCount = table.getPageCount()
 
+  // Rows after filtering, sorting and pagination - i.e. exactly what is on
+  // screen, which is the set worth spending the subscription budget on.
+  const visibleRows = table.getRowModel().rows
+  const visibleTickers = useMemo(
+    () => visibleRows.map((row) => row.original.ticker),
+    [visibleRows],
+  )
+  const visibleKey = visibleTickers.join(',')
+
+  useEffect(() => {
+    onVisibleTickersChange(visibleTickers)
+    // `visibleKey` is the stable identity of `visibleTickers`, which is a new
+    // array on every render. Keying on the contents stops this from re-reporting
+    // the same page and looping against the parent's state update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleKey, onVisibleTickersChange])
+
+  // Truthful only while the page fits the budget; past it the surplus rows show
+  // "—" because nobody is listening, not because nobody is trading. Charted
+  // tickers are counted in: they hold their subscriptions even when scrolled off
+  // this page, so they spend from the same budget.
+  const liveBudgetUsed = new Set([
+    ...slots.filter((ticker): ticker is string => ticker !== null),
+    ...visibleTickers,
+  ]).size
+  const liveTruncated = liveBudgetUsed > MAX_LIVE_SYMBOLS
+
   return (
     <section className="rounded-lg border border-[var(--hairline)] bg-[var(--surface-1)]">
       <header className="flex flex-wrap items-center gap-3 border-b border-[var(--hairline)] px-4 py-3">
@@ -251,6 +314,11 @@ export function CompanyTable({
           <span className="ml-2 font-normal text-[var(--text-secondary)]">
             {filteredCount} of {companies.length}
           </span>
+          {liveTruncated && (
+            <span className="ml-2 font-normal text-[var(--text-muted)]">
+              · live prices for the first {MAX_LIVE_SYMBOLS} only
+            </span>
+          )}
         </h2>
 
         <input
@@ -319,7 +387,7 @@ export function CompanyTable({
             ))}
           </thead>
           <tbody>
-            {table.getRowModel().rows.map((row) => (
+            {visibleRows.map((row) => (
               <tr
                 key={row.id}
                 className="border-b border-[var(--hairline)] last:border-0 hover:bg-[color-mix(in_oklab,var(--text-primary)_4%,transparent)]"
