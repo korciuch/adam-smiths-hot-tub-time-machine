@@ -48,7 +48,7 @@
             }
           },
           {
-            "name": "from_",
+            "name": "from",
             "in": "query",
             "required": false,
             "schema": {
@@ -61,7 +61,7 @@
                   "type": "null"
                 }
               ],
-              "title": "From "
+              "title": "From"
             }
           },
           {

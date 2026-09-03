@@ -24,9 +24,11 @@ The backend doesn't have to be up; reads degrade to an inline message.
 OpenAPI doc; don't hand-edit it, and rerun `gen:types` after backend schema
 changes. `openapi.json` is a snapshot so builds don't need a live backend.
 
-**`GET /prices` takes `from_`, not `from`** — Python keyword clash. `TASKS.md`
-says `from`, so `Query(alias="from")` is expected on the backend; it will fail
-typecheck in `src/lib/api/queries.ts`, which is intended.
+**Query objects in `src/lib/api/queries.ts` are annotated, not inline.**
+openapi-fetch's generics widen an inline literal enough that a stale or misspelled
+parameter name passes typecheck and is then silently dropped by FastAPI. Assigning
+to `PricesQuery`/`QuotesQuery`/`NotesQuery` first restores excess-property
+checking. Learned the hard way on `from` vs `from_`.
 
 **`chart_spec` is an untyped object in the API.** The shape this app accepts is
 specified and validated in `src/lib/ai/chart-spec.ts`. Anything else is dropped

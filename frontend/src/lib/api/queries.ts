@@ -7,14 +7,33 @@
  * result and decide how to degrade.
  */
 import { api } from './client'
+import type { paths } from './schema'
 import type { Company, Note, Price, Quote } from './types'
+
+/**
+ * Query objects are annotated with the generated parameter types rather than
+ * passed inline. openapi-fetch's generics widen an inline literal enough that a
+ * stale key slips through unchecked, and a silently ignored date filter is the
+ * kind of bug that looks like a backend problem for an hour.
+ */
+type PricesQuery = NonNullable<paths['/prices']['get']['parameters']['query']>
+type QuotesQuery = NonNullable<paths['/quotes/latest']['get']['parameters']['query']>
+type NotesQuery = NonNullable<paths['/notes']['get']['parameters']['query']>
 
 export type Fetched<T> = { ok: true; data: T } | { ok: false; error: string }
 
 /** Cache tag for everything notes-related, revalidated by the note actions. */
 export const NOTES_TAG = 'notes'
 
-const DAY_SECONDS = 60 * 60 * 24
+/**
+ * How long the UI may lag the database, not how often the underlying facts
+ * change. Constituents and daily closes both move rarely, but ingestion is what
+ * populates them, so a long window means a backfill appears to have done
+ * nothing. Shared by companies, prices and quotes so the table's companies and
+ * quotes can't expire at different times and show rows with no price. Notes are
+ * tag-revalidated instead, because their writes go through this app.
+ */
+const STALE_SECONDS = 60
 
 function failed(error: unknown): { ok: false; error: string } {
   if (error instanceof Error) {
@@ -33,7 +52,7 @@ function failed(error: unknown): { ok: false; error: string } {
 export async function getCompanies(): Promise<Fetched<Company[]>> {
   try {
     const { data, error } = await api.GET('/companies', {
-      next: { revalidate: DAY_SECONDS },
+      next: { revalidate: STALE_SECONDS },
     })
     if (error || !data) return { ok: false, error: 'Could not load companies.' }
     return { ok: true, data }
@@ -46,20 +65,16 @@ export async function getPrices(
   ticker: string,
   range?: { from?: string; to?: string },
 ): Promise<Fetched<Price[]>> {
+  const query: PricesQuery = {
+    ticker,
+    from: range?.from,
+    to: range?.to,
+  }
+
   try {
     const { data, error, response } = await api.GET('/prices', {
-      params: {
-        query: {
-          ticker,
-          // The backend declares this parameter as `from_` (Python keyword
-          // clash). Regenerating the schema after it gains an alias will fail
-          // the build here, which is the point.
-          from_: range?.from,
-          to: range?.to,
-        },
-      },
-      // Daily bars only change once a day; live movement comes over the relay.
-      next: { revalidate: 3600 },
+      params: { query },
+      next: { revalidate: STALE_SECONDS },
     })
     if (response.status === 404) {
       return { ok: false, error: `Unknown ticker: ${ticker}` }
@@ -73,10 +88,12 @@ export async function getPrices(
 
 export async function getLatestQuotes(tickers: string[]): Promise<Fetched<Quote[]>> {
   if (tickers.length === 0) return { ok: true, data: [] }
+
+  const query: QuotesQuery = { tickers: tickers.join(',') }
   try {
     const { data, error } = await api.GET('/quotes/latest', {
-      params: { query: { tickers: tickers.join(',') } },
-      next: { revalidate: 3600 },
+      params: { query },
+      next: { revalidate: STALE_SECONDS },
     })
     if (error || !data) return { ok: false, error: 'Could not load latest quotes.' }
     return { ok: true, data }
@@ -86,9 +103,10 @@ export async function getLatestQuotes(tickers: string[]): Promise<Fetched<Quote[
 }
 
 export async function getNotes(companyId?: number): Promise<Fetched<Note[]>> {
+  const query: NotesQuery = { company_id: companyId }
   try {
     const { data, error } = await api.GET('/notes', {
-      params: { query: { company_id: companyId } },
+      params: { query },
       next: { tags: [NOTES_TAG] },
     })
     if (error || !data) return { ok: false, error: 'Could not load notes.' }
