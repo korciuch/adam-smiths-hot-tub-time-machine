@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useMemo, useTransition } from 'react'
+import { useCallback, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 
 import type { Company, Note, Price, Quote } from '@/lib/api/types'
+import { MAX_LIVE_SYMBOLS } from '@/lib/ticks/protocol'
 import { useTicks } from '@/lib/ticks/useTicks'
 import {
   buildSearchParams,
@@ -87,7 +88,34 @@ export function Dashboard({ params, companies, quotes, notes, prices, errors }: 
     [slots],
   )
 
-  const { ticks, status } = useTicks(tickers)
+  /**
+   * Tickers the table currently has on screen. Subscribed alongside the charted
+   * ones so the Live column means "trading right now" for every visible row,
+   * which is what lets the table sort the active names to the top.
+   */
+  const [visibleTickers, setVisibleTickers] = useState<string[]>([])
+
+  const handleVisibleTickersChange = useCallback((next: string[]) => {
+    // Compared by content: the table reports a fresh array on every render, and
+    // storing it unconditionally would re-render the table, which would report
+    // again.
+    setVisibleTickers((previous) =>
+      previous.join(',') === next.join(',') ? previous : next,
+    )
+  }, [])
+
+  const liveSymbols = useMemo(() => {
+    // Charted tickers go first so they can never be the ones dropped by the cap -
+    // their live price extends the plotted line, while a table row just shows a
+    // dash.
+    const wanted = [...tickers]
+    for (const ticker of visibleTickers) {
+      if (!wanted.includes(ticker)) wanted.push(ticker)
+    }
+    return wanted.slice(0, MAX_LIVE_SYMBOLS)
+  }, [tickers, visibleTickers])
+
+  const { ticks, status } = useTicks(liveSymbols)
 
   // A selected ticker with no bars in the range stays in the series list with an
   // empty array; the chart labels it in the legend. Dropping it here instead
@@ -156,6 +184,7 @@ export function Dashboard({ params, companies, quotes, notes, prices, errors }: 
         slots={slots}
         onToggleTicker={toggleTicker}
         colorFor={colorFor}
+        onVisibleTickersChange={handleVisibleTickersChange}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">

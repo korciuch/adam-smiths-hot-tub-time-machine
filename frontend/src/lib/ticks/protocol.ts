@@ -9,6 +9,22 @@
 
 export const TICKS_PATH = '/api/ws/ticks'
 
+/**
+ * Ceiling on symbols subscribed at once. The relay shares one upstream across
+ * every browser tab, so this budget is global rather than per-client.
+ *
+ * PROVISIONAL - not a measured limit. Subscribing a 25-row page put the upstream
+ * into a connect/drop/reconnect loop, so Finnhub answers an over-subscription by
+ * closing the socket rather than ignoring the surplus. Which threshold was
+ * crossed is unresolved: repeated probing also degraded connections that had
+ * worked minutes earlier at two symbols, which points at a rate limit on
+ * connection attempts confounding the symbol count.
+ *
+ * Until it is measured on a rested key during market hours, keep this small
+ * enough that a full page never approaches whatever the real limit is.
+ */
+export const MAX_LIVE_SYMBOLS = 10
+
 export type Tick = {
   symbol: string
   price: number
