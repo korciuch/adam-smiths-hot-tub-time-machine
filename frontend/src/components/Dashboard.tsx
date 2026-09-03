@@ -144,6 +144,7 @@ export function Dashboard({ params, companies, quotes, notes, prices, errors }: 
         notes={notes}
         companyIdToTicker={companyIdToTicker}
         ticks={ticks}
+        rangeKey={`${from ?? ''}:${to ?? ''}`}
         normalize={normalize}
         onToggleNormalize={(next) => navigate({ normalize: next })}
       />

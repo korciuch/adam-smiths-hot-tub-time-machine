@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   IChartApi,
   ISeriesApi,
@@ -28,6 +28,12 @@ type Props = {
   notes: Note[]
   companyIdToTicker: Map<number, string>
   ticks: Record<string, Tick>
+  /**
+   * Identity of the active date range. Changing it refits the visible window,
+   * which is what makes the range presets ("1Y", "Max", …) frame their new data
+   * instead of inheriting the zoom from the previous range.
+   */
+  rangeKey: string
   /** Rebase each line to 100 at the range start so different price scales compare. */
   normalize: boolean
   onToggleNormalize: (next: boolean) => void
@@ -49,6 +55,7 @@ export function PriceChart({
   notes,
   companyIdToTicker,
   ticks,
+  rangeKey,
   normalize,
   onToggleNormalize,
 }: Props) {
@@ -56,11 +63,20 @@ export function PriceChart({
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map())
   const markersRef = useRef<Map<string, ISeriesMarkersPluginApi<Time>>>(new Map())
-  /** Set once the chart has been fitted, so later data updates keep the user's zoom. */
-  const fittedRef = useRef(false)
+  /**
+   * Range the visible window was last fitted for. A new range refits; an
+   * unrelated redraw (a ticker added, a live tick arriving) leaves the zoom the
+   * user set alone.
+   */
+  const fittedRangeRef = useRef<string | null>(null)
 
   const [hover, setHover] = useState<Hover | null>(null)
   const [showTable, setShowTable] = useState(false)
+  /**
+   * Why the chart is not doing what was asked - a failed fit, or a chart library
+   * chunk that never arrived. Surfaced instead of dropped on the floor.
+   */
+  const [chartError, setChartError] = useState<string | null>(null)
   const [colors, setColors] = useState<string[]>([])
   const [plotWidth, setPlotWidth] = useState(0)
   /**
@@ -75,6 +91,35 @@ export function PriceChart({
   const dataKey = series
     .map((s) => `${s.ticker}:${s.slot}:${s.prices.length}:${s.prices.at(-1)?.date ?? ''}`)
     .join('|')
+
+  /**
+   * Fit the visible window to the drawn data. Returns a message on failure and
+   * `null` on success, so the caller decides how to surface it.
+   *
+   * A React error boundary cannot help here: boundaries only catch errors thrown
+   * during render, not inside event handlers, so a throw from the click path
+   * would escape to `window.onerror` and leave the button looking inert. The
+   * failure is caught and reported as state instead.
+   */
+  const fitToData = useCallback((): string | null => {
+    const chart = chartRef.current
+    // The chart arrives from an async `import`, and its effect can be torn down
+    // and rebuilt while `seriesEpoch` still reads as ready.
+    if (!chart) return 'Chart is still loading — try again in a moment.'
+    if (seriesRef.current.size === 0) return 'No series drawn yet, nothing to fit.'
+
+    try {
+      chart.timeScale().fitContent()
+      return null
+    } catch (reason) {
+      // lightweight-charts throws once a chart is disposed; losing the race with
+      // an unmount is the realistic way to land here.
+      console.error('[PriceChart] fitContent failed', reason)
+      return reason instanceof Error
+        ? `Could not reset the zoom: ${reason.message}`
+        : 'Could not reset the zoom.'
+    }
+  }, [])
 
   // Chart instance: created once, themed and resized in place.
   useEffect(() => {
@@ -167,7 +212,17 @@ export function PriceChart({
       stopWatchingTheme = watchTheme(() => {
         if (chart) applyTokens(chart)
       })
-    })()
+    })().catch((reason) => {
+      // Covers a throw from setup itself - `createChart`, `applyTokens`, the
+      // theme watcher. It deliberately does not claim to cover a chart chunk
+      // that fails to arrive: measured against this build, Turbopack evaluates
+      // chunks outside this promise chain, so a failed request leaves the import
+      // pending forever and an evaluation throw goes to `window.onerror`.
+      // Neither reaches here, and both leave the button disabled with no message.
+      if (disposed) return
+      console.error('[PriceChart] chart failed to initialise', reason)
+      setChartError('The chart could not be loaded. Reload the page to try again.')
+    })
 
     const attached = seriesRef.current
     const markers = markersRef.current
@@ -178,7 +233,7 @@ export function PriceChart({
       stopWatchingTheme?.()
       attached.clear()
       markers.clear()
-      fittedRef.current = false
+      fittedRangeRef.current = null
       chart?.remove()
       chartRef.current = null
     }
@@ -222,17 +277,26 @@ export function PriceChart({
         api.setData(toLineData(entry.prices, normalize))
       }
 
-      if (!fittedRef.current && series.length > 0) {
-        chart.timeScale().fitContent()
-        fittedRef.current = true
+      // Fit on first draw and on every range change, so clicking "1Y" or "Max"
+      // frames the new window. `rangeKey` is a dependency in its own right: two
+      // ranges can resolve to identical bars (5Y and Max for a young listing),
+      // leaving `dataKey` unchanged even though the user asked for a new range.
+      if (series.length > 0 && fittedRangeRef.current !== rangeKey) {
+        fittedRangeRef.current = rangeKey
+        setChartError(fitToData())
       }
 
       setSeriesEpoch((epoch) => epoch + 1)
-    })()
+    })().catch((reason) => {
+      // Guards a throw from `addSeries` or `setData`; see the setup effect for
+      // what a missing chart chunk does instead.
+      console.error('[PriceChart] drawing the series failed', reason)
+      setChartError('The chart could not be drawn. Reload the page to try again.')
+    })
     // `dataKey` is the content identity of `series`; the array itself is a new
     // reference on every render, which would redraw on unrelated state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataKey, normalize, colors])
+  }, [dataKey, normalize, colors, rangeKey, fitToData])
 
   // Note annotations, redrawn whenever notes or the selection change.
   useEffect(() => {
@@ -327,8 +391,12 @@ export function PriceChart({
           </label>
           <button
             type="button"
-            onClick={() => chartRef.current?.timeScale().fitContent()}
-            className="h-8 rounded border border-[var(--hairline)] px-3"
+            onClick={() => setChartError(fitToData())}
+            // Disabled rather than a silent no-op: before the async chart import
+            // resolves there is genuinely nothing to fit, and a button that
+            // swallows clicks reads as broken.
+            disabled={series.length === 0 || seriesEpoch === 0}
+            className="h-8 rounded border border-[var(--hairline)] px-3 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Reset zoom
           </button>
@@ -342,6 +410,22 @@ export function PriceChart({
           </button>
         </div>
       </header>
+
+      {chartError && (
+        <p
+          role="alert"
+          className="flex items-center gap-2 border-b border-[var(--hairline)] px-4 py-2 text-sm text-[var(--status-serious)]"
+        >
+          {chartError}
+          <button
+            type="button"
+            onClick={() => setChartError(null)}
+            className="ml-auto text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          >
+            Dismiss
+          </button>
+        </p>
+      )}
 
       {/* Legend is always present for >= 2 series; with one, the title names it. */}
       {series.length > 0 && (
