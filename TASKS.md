@@ -40,5 +40,12 @@
 - `GET|POST|PUT|DELETE /notes` -> {id, ticker, date, text}
 - `POST /ai/query` -> {question} -> {data, chart_spec}
 
+## Dev ports & DB isolation
+- Backend dev: port 8000, DB `backend/data.db` (real ingested data). Frontend dev: port 3000 (Next.js custom server). Fixed, non-overlapping by convention - don't change defaults.
+- Ephemeral/one-off test servers: backend 8001, frontend 3001. Always pair with an isolated DB (e.g. `DATABASE_URL=sqlite:///./test.db`), never the dev DB.
+- Before starting any dev/test server: `lsof -ti:<port> | xargs kill -9` to guarantee a clean bind. Background processes can outlive a single terminal session and silently keep a port bound, causing a *new* server start to fail invisibly while a stale one keeps answering requests.
+- After stopping a server: verify with `lsof -i :<port>` that nothing remains before trusting the next run.
+- Never delete/recreate a DB file a server already has open and expect it to notice - a running process keeps its own file handle even after the file is unlinked and a new one is created with the same name. Stop the server first, reset the DB, then restart.
+
 ## Notes
 - SQLite file lives on backend only (system of record). IndexedDB, if used, is frontend cache only, not source of truth.
