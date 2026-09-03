@@ -4,6 +4,7 @@
 Usage:
     export TWELVE_DATA_API_KEY=your_key_here
     python scripts/backfill_prices.py                  # all companies
+    python scripts/backfill_prices.py --only-missing    # resume an interrupted run
     python scripts/backfill_prices.py --tickers AAPL,MSFT
     python scripts/backfill_prices.py --delay 8
 """
@@ -30,6 +31,11 @@ def parse_args():
     parser.add_argument("--tickers", default=None, help="Comma-separated tickers (default: all companies in DB).")
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS, help="Seconds between API calls.")
     parser.add_argument("--api-key", default=None, help="Overrides TWELVE_DATA_API_KEY env var.")
+    parser.add_argument(
+        "--only-missing",
+        action="store_true",
+        help="Skip companies that already have prices. Use this to resume.",
+    )
     return parser.parse_args()
 
 
@@ -46,7 +52,13 @@ def main():
 
     db = SessionLocal()
     try:
-        result = backfill_prices(db, api_key=api_key, tickers=tickers, delay_seconds=args.delay)
+        result = backfill_prices(
+            db,
+            api_key=api_key,
+            tickers=tickers,
+            delay_seconds=args.delay,
+            only_missing=args.only_missing,
+        )
         print(f"Succeeded: {len(result['succeeded'])}, Failed: {len(result['failed'])}")
         for failure in result["failed"]:
             print(f"  FAILED {failure['ticker']}: {failure['error']}")
