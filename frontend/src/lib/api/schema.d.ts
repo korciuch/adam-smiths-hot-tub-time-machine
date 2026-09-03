@@ -91,7 +91,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ai/query": {
+    "/ai/execute-sql": {
         parameters: {
             query?: never;
             header?: never;
@@ -100,8 +100,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ai Query */
-        post: operations["ai_query_ai_query_post"];
+        /**
+         * Execute Sql
+         * @description Execute a read-only SELECT written by the client's in-browser model.
+         *
+         *     There is no natural-language understanding here by design (TASKS.md): the
+         *     WebLLM engine in the browser translates the question, and this endpoint is
+         *     one fixed, guarded action. See `sql_guard` for the trust model.
+         */
+        post: operations["execute_sql_ai_execute_sql_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -129,24 +136,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AIQueryRequest */
-        AIQueryRequest: {
-            /** Question */
-            question: string;
-        };
-        /** AIQueryResponse */
-        AIQueryResponse: {
-            /** Answer */
-            answer: string;
-            /** Data */
-            data?: {
-                [key: string]: unknown;
-            }[] | null;
-            /** Chart Spec */
-            chart_spec?: {
-                [key: string]: unknown;
-            } | null;
-        };
         /** CompanyOut */
         CompanyOut: {
             /** Id */
@@ -226,6 +215,42 @@ export interface components {
              * Format: date
              */
             date: string;
+        };
+        /** SQLExecuteRequest */
+        SQLExecuteRequest: {
+            /** Sql */
+            sql: string;
+        };
+        /**
+         * SQLExecuteResponse
+         * @description Result of a client-supplied SELECT.
+         *
+         *     A rejected or failing query is a 200 with `error` set, not a 4xx. The
+         *     client's retry loop feeds `error` back to the model for a correction pass,
+         *     which makes a failed query ordinary control flow rather than an exception -
+         *     and keeps the message out of a transport-level error envelope the browser
+         *     would have to unwrap.
+         */
+        SQLExecuteResponse: {
+            /**
+             * Columns
+             * @default []
+             */
+            columns: string[];
+            /**
+             * Rows
+             * @default []
+             */
+            rows: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Error */
+            error?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -461,7 +486,7 @@ export interface operations {
             };
         };
     };
-    ai_query_ai_query_post: {
+    execute_sql_ai_execute_sql_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -470,7 +495,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AIQueryRequest"];
+                "application/json": components["schemas"]["SQLExecuteRequest"];
             };
         };
         responses: {
@@ -480,7 +505,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AIQueryResponse"];
+                    "application/json": components["schemas"]["SQLExecuteResponse"];
                 };
             };
             /** @description Validation Error */

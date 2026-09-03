@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+# compiled output of `npm run check:ai`
+/.ai-check/
 
 # next.js
 /.next/

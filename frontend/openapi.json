@@ -333,18 +333,19 @@
         }
       }
     },
-    "/ai/query": {
+    "/ai/execute-sql": {
       "post": {
         "tags": [
           "ai"
         ],
-        "summary": "Ai Query",
-        "operationId": "ai_query_ai_query_post",
+        "summary": "Execute Sql",
+        "description": "Execute a read-only SELECT written by the client's in-browser model.\n\nThere is no natural-language understanding here by design (TASKS.md): the\nWebLLM engine in the browser translates the question, and this endpoint is\none fixed, guarded action. See `sql_guard` for the trust model.",
+        "operationId": "execute_sql_ai_execute_sql_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AIQueryRequest"
+                "$ref": "#/components/schemas/SQLExecuteRequest"
               }
             }
           },
@@ -356,7 +357,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AIQueryResponse"
+                  "$ref": "#/components/schemas/SQLExecuteResponse"
                 }
               }
             }
@@ -393,60 +394,6 @@
   },
   "components": {
     "schemas": {
-      "AIQueryRequest": {
-        "properties": {
-          "question": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Question"
-          }
-        },
-        "type": "object",
-        "required": [
-          "question"
-        ],
-        "title": "AIQueryRequest"
-      },
-      "AIQueryResponse": {
-        "properties": {
-          "answer": {
-            "type": "string",
-            "title": "Answer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Data"
-          },
-          "chart_spec": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Chart Spec"
-          }
-        },
-        "type": "object",
-        "required": [
-          "answer"
-        ],
-        "title": "AIQueryResponse"
-      },
       "CompanyOut": {
         "properties": {
           "id": {
@@ -685,6 +632,61 @@
           "date"
         ],
         "title": "QuoteOut"
+      },
+      "SQLExecuteRequest": {
+        "properties": {
+          "sql": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Sql"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sql"
+        ],
+        "title": "SQLExecuteRequest"
+      },
+      "SQLExecuteResponse": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns",
+            "default": []
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rows",
+            "default": []
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "title": "SQLExecuteResponse",
+        "description": "Result of a client-supplied SELECT.\n\nA rejected or failing query is a 200 with `error` set, not a 4xx. The\nclient's retry loop feeds `error` back to the model for a correction pass,\nwhich makes a failed query ordinary control flow rather than an exception -\nand keeps the message out of a transport-level error envelope the browser\nwould have to unwrap."
       },
       "ValidationError": {
         "properties": {

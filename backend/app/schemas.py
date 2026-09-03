@@ -53,11 +53,23 @@ class NoteOut(NoteBase):
     created_at: datetime.datetime
 
 
-class AIQueryRequest(BaseModel):
-    question: str = Field(min_length=1)
+class SQLExecuteRequest(BaseModel):
+    # No length ceiling beyond this: the client's model has a small context
+    # window, so anything longer than a few KB is not a query it produced.
+    sql: str = Field(min_length=1, max_length=8000)
 
 
-class AIQueryResponse(BaseModel):
-    answer: str
-    data: Optional[List[Dict]] = None
-    chart_spec: Optional[Dict] = None
+class SQLExecuteResponse(BaseModel):
+    """Result of a client-supplied SELECT.
+
+    A rejected or failing query is a 200 with `error` set, not a 4xx. The
+    client's retry loop feeds `error` back to the model for a correction pass,
+    which makes a failed query ordinary control flow rather than an exception -
+    and keeps the message out of a transport-level error envelope the browser
+    would have to unwrap.
+    """
+
+    columns: List[str] = []
+    rows: List[Dict] = []
+    truncated: bool = False
+    error: Optional[str] = None
